@@ -89,12 +89,12 @@ app.get("/tts", (req, res) => {
 /* ===============================
    BROWSER → CALL API (NEW)
 ================================ */
-app.post("/call", async (req, res) => {
+app.get("/call", async (req, res) => {
   try {
-    const { phone } = req.body;
+    const phone = req.query.phone;
 
     if (!phone) {
-      return res.status(400).json({ error: "Phone number required" });
+      return res.send("❌ Phone number missing. Use ?phone=%2B91XXXXXXXXXX");
     }
 
     const twilioRes = await fetch(
@@ -115,11 +115,16 @@ app.post("/call", async (req, res) => {
       }
     );
 
-    const text = await twilioRes.text();
-    res.json({ success: true, twilio: text });
+    const result = await twilioRes.text();
+
+    res.send(`
+      <h2>📞 Call Initiated</h2>
+      <p>Calling: <b>${phone}</b></p>
+      <pre>${result}</pre>
+    `);
   } catch (err) {
     console.error("CALL ERROR:", err);
-    res.status(500).json({ error: "Call failed" });
+    res.status(500).send("❌ Call failed");
   }
 });
 
@@ -130,3 +135,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
   console.log(`✅ IVR Node server running on port ${PORT}`)
 );
+
