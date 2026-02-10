@@ -1,0 +1,12 @@
+{
+  "name": "ivr-node",
+  "type": "module",
+  "dependencies": {
+    "express": "^4.19.2",
+    "mysql2": "^3.9.2",
+    "dotenv": "^16.4.5",
+    "ws": "^8.16.0",
+    "node-fetch": "^3.3.2",
+    "body-parser": "^1.20.2"
+  }
+}
