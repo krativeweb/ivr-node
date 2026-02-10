@@ -1,10 +1,14 @@
 import express from "express";
 import bodyParser from "body-parser";
+import http from "http";
+import { WebSocketServer } from "ws";
+import fetch from "node-fetch";
+
 import { conn } from "./db.js";
-import { speakAndListen, hangup } from "./helpers.js";
+import { hangup } from "./helpers.js";
 import { elevenLabsStream } from "./elevenlabsStream.js";
 import { processHandler } from "./process.js";
-import fetch from "node-fetch";
+
 import {
   TWILIO_SID,
   TWILIO_TOKEN,
@@ -12,100 +16,38 @@ import {
   BASE_URL
 } from "./config.js";
 
+/* ===============================
+   EXPRESS APP
+================================ */
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
 /* ===============================
-   HEALTH CHECK (RENDER NEEDS THIS)
+   HEALTH CHECK (RENDER SAFE)
 ================================ */
 app.get("/", (req, res) => {
   res.send("IVR Node server running ✅");
 });
 
 /* ===============================
-   TWILIO VOICE ENTRY
+   TWILIO VOICE ENTRY (NO PLAY)
 ================================ */
-app.post("/voice", async (req, res) => {
-  res.set("Content-Type", "text/xml");
+app.post("/voice", (req, res) => {
+  res.type("text/xml");
 
-  const callSid = req.body.CallSid;
-
-  if (!callSid) {
-    return res.status(200).send(`
-      <Response>
-        <Say>Sorry, something went wrong.</Say>
-        <Hangup/>
-      </Response>
-    `);
-  }
-
-  try {
-    // ⚡ FAST READ ONLY
-    const [[q]] = await conn.query(
-      `
-      SELECT q.id, q.question
-      FROM bot_questions q
-      WHERE q.id NOT IN (
-        SELECT question_id FROM call_questions WHERE call_sid = ?
-      )
-      ORDER BY q.id ASC
-      LIMIT 1
-      `,
-      [callSid]
-    );
-
-    if (!q) {
-      return res.status(200).send(`
-        <Response>
-          <Play>${BASE_URL}/tts?text=${encodeURIComponent(
-            "Thank you. All questions are completed. Goodbye."
-          )}</Play>
-          <Hangup/>
-        </Response>
-      `);
-    }
-
-    // ✅ RESPOND FIRST (THIS FIXES 11200)
-    res.status(200).send(`
-      <Response>
-        <Gather input="speech"
-                bargeIn="true"
-                speechTimeout="auto"
-                timeout="3"
-                action="${BASE_URL}/process?qid=${q.id}"
-                method="POST">
-          <Play>${BASE_URL}/tts?text=${encodeURIComponent(q.question)}</Play>
-        </Gather>
-        <Redirect method="POST">
-          ${BASE_URL}/process?qid=${q.id}
-        </Redirect>
-      </Response>
-    `);
-
-    // 🔁 DB WRITE AFTER RESPONSE (NON-BLOCKING)
-    conn
-      .query(
-        "INSERT INTO call_questions (call_sid, question_id) VALUES (?, ?)",
-        [callSid, q.id]
-      )
-      .catch(err => console.error("DB INSERT ERROR:", err));
-
-  } catch (err) {
-    console.error("VOICE ERROR:", err);
-
-    // 🚑 ALWAYS RETURN 200
-    res.status(200).send(`
-      <Response>
-        <Say>A system error occurred.</Say>
-        <Hangup/>
-      </Response>
-    `);
-  }
+  res.send(`
+<Response>
+  <Connect>
+    <Stream url="wss://${req.headers.host}/media" />
+  </Connect>
+</Response>
+`);
 });
 
 /* ===============================
-   PROCESS (SPEECH RESULT)
+   PROCESS (INTENT LOGIC — UNCHANGED)
+   ⚠️ Requires STT input
 ================================ */
 app.post("/process", async (req, res) => {
   try {
@@ -117,19 +59,7 @@ app.post("/process", async (req, res) => {
 });
 
 /* ===============================
-   ELEVENLABS STREAM (INSTANT)
-================================ */
-app.get("/tts", (req, res) => {
-  try {
-    elevenLabsStream(req.query.text || "", res);
-  } catch (err) {
-    console.error("TTS ERROR:", err);
-    res.end();
-  }
-});
-
-/* ===============================
-   BROWSER → CALL API (NEW)
+   BROWSER → START CALL
 ================================ */
 app.get("/call", async (req, res) => {
   try {
@@ -171,11 +101,78 @@ app.get("/call", async (req, res) => {
 });
 
 /* ===============================
-   START SERVER (RENDER SAFE)
+   HTTP SERVER (REQUIRED)
+================================ */
+const server = http.createServer(app);
+
+/* ===============================
+   TWILIO MEDIA STREAM SERVER
+================================ */
+const wss = new WebSocketServer({ server, path: "/media" });
+
+wss.on("connection", ws => {
+  let streamSid = null;
+  let callSid = null;
+
+  ws.on("message", async msg => {
+    const data = JSON.parse(msg.toString());
+
+    /* -------- STREAM START -------- */
+    if (data.event === "start") {
+      streamSid = data.start.streamSid;
+      callSid = data.start.callSid;
+
+      console.log("🎧 Media stream started:", streamSid);
+
+      /* FETCH FIRST QUESTION (NO LOGIC CHANGE) */
+      const [[q]] = await conn.query(
+        `
+        SELECT q.id, q.question
+        FROM bot_questions q
+        WHERE q.id NOT IN (
+          SELECT question_id FROM call_questions WHERE call_sid = ?
+        )
+        ORDER BY q.id ASC
+        LIMIT 1
+        `,
+        [callSid]
+      );
+
+      if (!q) {
+        elevenLabsStream(
+          "Thank you. All questions are completed. Goodbye.",
+          ws,
+          streamSid
+        );
+        return;
+      }
+
+      /* INSERT QUESTION (SAME AS BEFORE) */
+      conn.query(
+        "INSERT INTO call_questions (call_sid, question_id) VALUES (?, ?)",
+        [callSid, q.id]
+      ).catch(() => {});
+
+      /* 🔥 INSTANT SPEAK */
+      elevenLabsStream(q.question, ws, streamSid);
+    }
+
+    /* -------- CALL ENDED -------- */
+    if (data.event === "stop") {
+      console.log("📴 Media stream stopped:", streamSid);
+      ws.close();
+    }
+  });
+
+  ws.on("close", () => {
+    console.log("❌ WebSocket closed");
+  });
+});
+
+/* ===============================
+   START SERVER
 ================================ */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`✅ IVR Node server running on port ${PORT}`)
-);
-
-
+server.listen(PORT, () => {
+  console.log(`🔥 INSTANT IVR SERVER running on port ${PORT}`);
+});
