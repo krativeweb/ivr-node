@@ -1,6 +1,15 @@
 import fs from "fs";
 import { BASE_URL } from "./config.js";
 
+function xmlEscape(str = "") {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 export function logCall(text) {
   fs.appendFileSync(
     "./logs/call.log",
@@ -22,26 +31,38 @@ export function speakAndListen(res, text, action, callSid) {
       encodeURIComponent(callSid);
   }
 
+  // 🔥 XML ESCAPE EVERYTHING
+  const safeAction = actionUrl ? xmlEscape(actionUrl) : null;
+  const safeText = xmlEscape(text);
+  const playUrl = xmlEscape(
+    `${BASE_URL}/tts?text=${encodeURIComponent(text)}`
+  );
+
   res.send(`
 <Response>
 ${
-  actionUrl
-    ? `<Gather input="speech" bargeIn="true" speechTimeout="auto" timeout="3"
-          action="${actionUrl}" method="POST">
-        <Play>${BASE_URL}/tts?text=${encodeURIComponent(text)}</Play>
+  safeAction
+    ? `<Gather input="speech"
+        bargeIn="true"
+        speechTimeout="auto"
+        timeout="3"
+        action="${safeAction}"
+        method="POST">
+        <Play>${playUrl}</Play>
       </Gather>
-      <Redirect method="POST">${actionUrl}</Redirect>`
-    : `<Play>${BASE_URL}/tts?text=${encodeURIComponent(text)}</Play>
-       <Hangup/>`
+      <Redirect method="POST">${safeAction}</Redirect>`
+    : `<Play>${playUrl}</Play><Hangup/>`
 }
 </Response>
 `);
 }
 
 export function hangup(res, text) {
+  const playUrl = `${BASE_URL}/tts?text=${encodeURIComponent(text)}`;
+
   res.send(`
 <Response>
-  <Play>${BASE_URL}/tts?text=${encodeURIComponent(text)}</Play>
+  <Play>${xmlEscape(playUrl)}</Play>
   <Hangup/>
 </Response>
 `);
