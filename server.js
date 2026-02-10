@@ -27,12 +27,21 @@ app.get("/", (req, res) => {
    TWILIO VOICE ENTRY
 ================================ */
 app.post("/voice", async (req, res) => {
+  res.set("Content-Type", "text/xml");
+
+  const callSid = req.body.CallSid;
+
+  if (!callSid) {
+    return res.status(200).send(`
+      <Response>
+        <Say>Sorry, something went wrong.</Say>
+        <Hangup/>
+      </Response>
+    `);
+  }
+
   try {
-    res.type("text/xml");
-
-    const callSid = req.body.CallSid;
-    if (!callSid) return hangup(res, "Sorry, something went wrong.");
-
+    // ⚡ FAST READ ONLY
     const [[q]] = await conn.query(
       `
       SELECT q.id, q.question
@@ -47,18 +56,51 @@ app.post("/voice", async (req, res) => {
     );
 
     if (!q) {
-      return hangup(res, "Thank you. All questions are completed. Goodbye.");
+      return res.status(200).send(`
+        <Response>
+          <Play>${BASE_URL}/tts?text=${encodeURIComponent(
+            "Thank you. All questions are completed. Goodbye."
+          )}</Play>
+          <Hangup/>
+        </Response>
+      `);
     }
 
-    await conn.query(
-      "INSERT INTO call_questions (call_sid, question_id) VALUES (?, ?)",
-      [callSid, q.id]
-    );
+    // ✅ RESPOND FIRST (THIS FIXES 11200)
+    res.status(200).send(`
+      <Response>
+        <Gather input="speech"
+                bargeIn="true"
+                speechTimeout="auto"
+                timeout="3"
+                action="${BASE_URL}/process?qid=${q.id}"
+                method="POST">
+          <Play>${BASE_URL}/tts?text=${encodeURIComponent(q.question)}</Play>
+        </Gather>
+        <Redirect method="POST">
+          ${BASE_URL}/process?qid=${q.id}
+        </Redirect>
+      </Response>
+    `);
 
-    speakAndListen(res, q.question, `process?qid=${q.id}`, callSid);
+    // 🔁 DB WRITE AFTER RESPONSE (NON-BLOCKING)
+    conn
+      .query(
+        "INSERT INTO call_questions (call_sid, question_id) VALUES (?, ?)",
+        [callSid, q.id]
+      )
+      .catch(err => console.error("DB INSERT ERROR:", err));
+
   } catch (err) {
     console.error("VOICE ERROR:", err);
-    hangup(res, "A system error occurred. Please try again later.");
+
+    // 🚑 ALWAYS RETURN 200
+    res.status(200).send(`
+      <Response>
+        <Say>A system error occurred.</Say>
+        <Hangup/>
+      </Response>
+    `);
   }
 });
 
@@ -135,4 +177,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
   console.log(`✅ IVR Node server running on port ${PORT}`)
 );
+
 
