@@ -25,6 +25,7 @@ export function elevenLabsStream(text, twilioWs, streamSid) {
     elWs.send(
       JSON.stringify({
         text,
+        output_format: "ulaw_8000", // ✅ REQUIRED FOR TWILIO
         voice_settings: {
           stability: 0.4,
           similarity_boost: 0.7
@@ -35,23 +36,21 @@ export function elevenLabsStream(text, twilioWs, streamSid) {
 
   elWs.on("message", msg => {
     const data = JSON.parse(msg.toString());
-
     if (!data.audio) return;
 
-    // 🔥 SEND AUDIO TO TWILIO IN REAL TIME
+    // 🔥 STREAM AUDIO TO TWILIO IN REAL TIME
     twilioWs.send(
       JSON.stringify({
         event: "media",
         streamSid,
         media: {
-          payload: data.audio // already base64
+          payload: data.audio // base64 μ-law audio
         }
       })
     );
   });
 
-  elWs.on("close", () => {});
-  elWs.on("error", err =>
-    console.error("ElevenLabs WS error:", err)
-  );
+  elWs.on("error", err => {
+    console.error("ElevenLabs WS error:", err);
+  });
 }
