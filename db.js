@@ -1,7 +1,7 @@
 import mysql from "mysql2/promise";
 
 export const conn = mysql.createPool({
-  host: "srv1404.hstgr.io",
+  host: "193.203.184.86",
   user: "u174778840_ivrai",
   password: "s6:N/D!>^>H",
   database: "u174778840_ivrai",
@@ -19,3 +19,4 @@ export const conn = mysql.createPool({
     process.exit(1);
   }
 })();
+
