@@ -10,14 +10,14 @@ import {
  * ElevenLabs → Twilio Media Stream
  */
 export function elevenLabsStream(text, twilioWs, streamSid) {
-  const elWs = new WebSocket(
-    `wss://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream-input?model_id=eleven_monolingual_v1`,
-    {
-      headers: {
-        "xi-api-key": ELEVENLABS_API_KEY
-      }
+const elWs = new WebSocket(
+  `wss://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream-input?model_id=eleven_monolingual_v1&output_format=ulaw_8000`,
+  {
+    headers: {
+      "xi-api-key": ELEVENLABS_API_KEY
     }
-  );
+  }
+);
 
   elWs.on("open", () => {
     console.log("🟢 ElevenLabs connected");
@@ -76,3 +76,4 @@ export function elevenLabsStream(text, twilioWs, streamSid) {
     console.log("🔴 ElevenLabs closed");
   });
 }
+
