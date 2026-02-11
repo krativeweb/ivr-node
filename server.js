@@ -123,6 +123,7 @@ wss.on("connection", ws => {
       callSid = data.start.callSid;
 
       console.log("🎧 Media stream started:", streamSid);
+      console.log("Welcome to M L O Market.");
     elevenLabsStream("Welcome to M L O Market.", ws, streamSid);
       console.log("hello");
       /* FETCH FIRST QUESTION (NO LOGIC CHANGE) */
