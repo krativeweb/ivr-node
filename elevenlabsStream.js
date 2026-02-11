@@ -6,14 +6,12 @@ import {
 } from "./config.js";
 
 /**
- * Streams ElevenLabs audio directly into Twilio Media Stream
- * @param {string} text
- * @param {WebSocket} twilioWs
- * @param {string} streamSid
+ * REAL INSTANT STREAMING
+ * ElevenLabs → Twilio Media Stream
  */
 export function elevenLabsStream(text, twilioWs, streamSid) {
   const elWs = new WebSocket(
-    `wss://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream-input`,
+    `wss://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream-input?model_id=eleven_monolingual_v1`,
     {
       headers: {
         "xi-api-key": ELEVENLABS_API_KEY
@@ -22,35 +20,59 @@ export function elevenLabsStream(text, twilioWs, streamSid) {
   );
 
   elWs.on("open", () => {
+    console.log("🟢 ElevenLabs connected");
+
+    // 🔥 CRITICAL: Send begin packet first (for low latency)
     elWs.send(
       JSON.stringify({
-        text,
-        output_format: "ulaw_8000", // ✅ REQUIRED FOR TWILIO
+        text: " ", // small starter packet (VERY IMPORTANT)
         voice_settings: {
           stability: 0.4,
           similarity_boost: 0.7
-        }
+        },
+        output_format: "ulaw_8000"
       })
     );
+
+    // 🔥 Then send actual text
+    elWs.send(
+      JSON.stringify({
+        text: text,
+        try_trigger_generation: true
+      })
+    );
+
+    // 🔥 Close text input
+    elWs.send(JSON.stringify({ text: "" }));
   });
 
   elWs.on("message", msg => {
     const data = JSON.parse(msg.toString());
-    if (!data.audio) return;
 
-    // 🔥 STREAM AUDIO TO TWILIO IN REAL TIME
-    twilioWs.send(
-      JSON.stringify({
-        event: "media",
-        streamSid,
-        media: {
-          payload: data.audio // base64 μ-law audio
-        }
-      })
-    );
+    if (data.audio) {
+      // 🔥 STREAM DIRECTLY TO TWILIO
+      twilioWs.send(
+        JSON.stringify({
+          event: "media",
+          streamSid,
+          media: {
+            payload: data.audio
+          }
+        })
+      );
+    }
+
+    if (data.isFinal) {
+      console.log("✅ ElevenLabs finished streaming");
+      elWs.close();
+    }
   });
 
   elWs.on("error", err => {
-    console.error("ElevenLabs WS error:", err);
+    console.error("❌ ElevenLabs error:", err);
+  });
+
+  elWs.on("close", () => {
+    console.log("🔴 ElevenLabs closed");
   });
 }
