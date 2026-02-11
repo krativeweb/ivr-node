@@ -123,7 +123,8 @@ wss.on("connection", ws => {
       callSid = data.start.callSid;
 
       console.log("🎧 Media stream started:", streamSid);
-
+    elevenLabsStream("Welcome to M L O Market.", ws, streamSid);
+      console.log("hello");
       /* FETCH FIRST QUESTION (NO LOGIC CHANGE) */
       const [[q]] = await conn.query(
         `
@@ -176,3 +177,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🔥 INSTANT IVR SERVER running on port ${PORT}`);
 });
+
